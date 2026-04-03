@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude — Assistant Vocal</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0f0f0f;
+    --surface: #1a1a1a;
+    --border: rgba(255,255,255,0.08);
+    --text: #f0ede8;
+    --muted: rgba(240,237,232,0.45);
+    --hint: rgba(240,237,232,0.25);
+    --accent: #c8b89a;
+    --blue: #7eb8d4;
+    --red: #d47e7e;
+    --green: #7ed4a0;
+    --purple: #a07ed4;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 300;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    overflow: hidden;
+  }
+
+  .bg-grain {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+    opacity: 0.4;
+  }
+
+  .container {
+    position: relative; z-index: 1;
+    width: 100%; max-width: 560px;
+    display: flex; flex-direction: column; align-items: center; gap: 2rem;
+  }
+
+  .brand {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.1rem;
+    color: var(--accent);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    opacity: 0.8;
+  }
+
+  /* ORB */
+  .orb-wrap {
+    position: relative;
+    width: 180px; height: 180px;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .orb-ring {
+    position: absolute; inset: 0;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    transition: border-color 0.4s, transform 0.4s;
+  }
+
+  .orb-ring-2 {
+    position: absolute;
+    inset: 14px;
+    border-radius: 50%;
+    border: 1px solid transparent;
+    transition: all 0.4s;
+  }
+
+  .orb {
+    width: 120px; height: 120px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 2.8rem;
+    cursor: pointer;
+    transition: all 0.3s;
+    position: relative; z-index: 2;
+    user-select: none;
+  }
+
+  .orb:hover { transform: scale(1.04); }
+
+  /* States */
+  body.waiting .orb { border-color: rgba(255,255,255,0.12); }
+  body.listening .orb { border-color: var(--blue); box-shadow: 0 0 40px rgba(126,184,212,0.15); }
+  body.listening .orb-ring { border-color: rgba(126,184,212,0.2); animation: ring-pulse 2s infinite; }
+  body.listening .orb-ring-2 { border-color: rgba(126,184,212,0.15); animation: ring-pulse 2s 0.3s infinite; }
+  body.recording .orb { border-color: var(--red); box-shadow: 0 0 40px rgba(212,126,126,0.2); animation: record-throb 0.8s infinite; }
+  body.recording .orb-ring { border-color: rgba(212,126,126,0.25); animation: ring-pulse 1s infinite; }
+  body.thinking .orb { border-color: var(--purple); box-shadow: 0 0 40px rgba(160,126,212,0.15); }
+  body.thinking .orb-ring { border-color: rgba(160,126,212,0.2); animation: spin 3s linear infinite; }
+  body.speaking .orb { border-color: var(--green); box-shadow: 0 0 40px rgba(126,212,160,0.15); }
+  body.speaking .orb-ring { border-color: rgba(126,212,160,0.2); animation: ring-pulse 0.6s infinite; }
+
+  @keyframes ring-pulse { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.06);opacity:0.5} }
+  @keyframes record-throb { 0%,100%{transform:scale(1)} 50%{transform:scale(1.03)} }
+  @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+
+  .state-text {
+    text-align: center;
+  }
+
+  .state-label {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.5rem;
+    color: var(--text);
+    margin-bottom: 6px;
+    transition: color 0.3s;
+  }
+
+  .state-hint {
+    font-size: 0.8rem;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+  }
+
+  body.listening .state-label { color: var(--blue); }
+  body.recording .state-label { color: var(--red); }
+  body.thinking .state-label { color: var(--purple); }
+  body.speaking .state-label { color: var(--green); }
+
+  /* Keywords */
+  .keywords {
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center;
+  }
+
+  .kw {
+    padding: 5px 14px;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    letter-spacing: 0.03em;
+    border: 1px solid;
+  }
+
+  .kw.wake { color: var(--blue); border-color: rgba(126,184,212,0.3); background: rgba(126,184,212,0.06); }
+  .kw.send { color: var(--green); border-color: rgba(126,212,160,0.3); background: rgba(126,212,160,0.06); }
+  .kw-sep { color: var(--hint); font-size: 0.75rem; }
+
+  /* Transcript / Response */
+  .bubble-wrap { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+
+  .bubble {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 14px 18px;
+    font-size: 0.88rem;
+    line-height: 1.7;
+    color: var(--muted);
+    min-height: 52px;
+    transition: border-color 0.3s;
+    position: relative;
+  }
+
+  .bubble-label {
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    color: var(--hint);
+  }
+
+  .bubble.you { border-left: 2px solid rgba(126,184,212,0.4); }
+  .bubble.you .bubble-label { color: rgba(126,184,212,0.6); }
+  .bubble.you.active { color: var(--text); border-left-color: var(--blue); }
+
+  .bubble.claude { border-left: 2px solid rgba(126,212,160,0.4); }
+  .bubble.claude .bubble-label { color: rgba(126,212,160,0.6); }
+  .bubble.claude.active { color: var(--text); border-left-color: var(--green); }
+
+  /* Controls */
+  .controls { display: flex; gap: 10px; }
+
+  .btn {
+    padding: 10px 22px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 400;
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.02em;
+  }
+
+  .btn:hover { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.15); }
+  .btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  .btn.primary {
+    background: var(--accent);
+    color: #0f0f0f;
+    border-color: var(--accent);
+    font-weight: 500;
+  }
+
+  .btn.primary:hover { opacity: 0.88; }
+
+  /* Setup overlay */
+  .setup-overlay {
+    position: fixed; inset: 0; z-index: 100;
+    background: rgba(15,15,15,0.97);
+    display: flex; align-items: center; justify-content: center;
+    padding: 2rem;
+  }
+
+  .setup-box {
+    width: 100%; max-width: 440px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2rem;
+  }
+
+  .setup-title {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.4rem;
+    color: var(--accent);
+    margin-bottom: 0.4rem;
+  }
+
+  .setup-sub {
+    font-size: 0.82rem;
+    color: var(--muted);
+    margin-bottom: 1.5rem;
+    line-height: 1.6;
+  }
+
+  .field { margin-bottom: 1rem; }
+  .field label { display: block; font-size: 0.78rem; color: var(--muted); margin-bottom: 6px; letter-spacing: 0.05em; }
+  .field input {
+    width: 100%;
+    padding: 10px 14px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.88rem;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .field input:focus { border-color: rgba(200,184,154,0.4); }
+
+  .setup-error { font-size: 0.8rem; color: var(--red); margin-top: 8px; display: none; }
+
+  /* History */
+  .history-panel {
+    position: fixed; inset: 0; z-index: 50;
+    background: rgba(15,15,15,0.97);
+    padding: 2rem;
+    overflow-y: auto;
+    display: none;
+  }
+
+  .history-panel.open { display: block; }
+  .history-title { font-family: 'DM Serif Display', serif; font-size: 1.3rem; color: var(--accent); margin-bottom: 1.5rem; }
+  .history-item { padding: 14px 0; border-bottom: 1px solid var(--border); }
+  .history-you { font-size: 0.78rem; color: var(--blue); margin-bottom: 4px; }
+  .history-claude { font-size: 0.88rem; color: var(--muted); line-height: 1.6; }
+  .history-empty { color: var(--hint); font-size: 0.88rem; }
+
+  .footer-links {
+    display: flex; gap: 16px;
+  }
+
+  .footer-btn {
+    background: none; border: none; color: var(--hint);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.75rem; cursor: pointer; padding: 0;
+    transition: color 0.2s; letter-spacing: 0.04em;
+  }
+  .footer-btn:hover { color: var(--muted); }
+</style>
+</head>
+<body class="waiting">
+<div class="bg-grain"></div>
+
+<!-- Setup overlay -->
+<div class="setup-overlay" id="setupOverlay">
+  <div class="setup-box">
+    <div class="setup-title">Configuration</div>
+    <div class="setup-sub">Entre ta clé API Claude pour activer l'assistant vocal. Tu peux la trouver sur <strong style="color:var(--accent)">console.anthropic.com</strong></div>
+    <div class="field">
+      <label>CLÉ API ANTHROPIC</label>
+      <input type="password" id="apiInput" placeholder="sk-ant-api03-..." autocomplete="off">
+    </div>
+    <div class="setup-error" id="setupError">Clé invalide. Elle doit commencer par sk-ant-</div>
+    <button class="btn primary" style="width:100%; margin-top:0.5rem;" onclick="saveSetup()">Activer l'assistant →</button>
+  </div>
+</div>
+
+<!-- History panel -->
+<div class="history-panel" id="historyPanel">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+    <div class="history-title">Historique</div>
+    <button class="footer-btn" onclick="toggleHistory()">Fermer ✕</button>
+  </div>
+  <div id="historyContent"><div class="history-empty">Aucune conversation pour l'instant.</div></div>
+</div>
+
+<div class="container">
+  <div class="brand">Claude · Assistant Vocal</div>
+
+  <div class="orb-wrap">
+    <div class="orb-ring"></div>
+    <div class="orb-ring-2"></div>
+    <div class="orb" id="orb" onclick="orbClick()">🎤</div>
+  </div>
+
+  <div class="state-text">
+    <div class="state-label" id="stateLabel">Prêt</div>
+    <div class="state-hint" id="stateHint">Appuie sur le bouton pour activer</div>
+  </div>
+
+  <div class="keywords">
+    <span class="kw wake">👂 "Hey Claude"</span>
+    <span class="kw-sep">pour activer</span>
+    <span class="kw send">📨 "Envoyer"</span>
+    <span class="kw-sep">pour envoyer</span>
+  </div>
+
+  <div class="bubble-wrap">
+    <div class="bubble you" id="bubbleYou">
+      <div class="bubble-label">Tu dis</div>
+      <span id="transcriptText">En attente de ta voix...</span>
+    </div>
+    <div class="bubble claude" id="bubbleClaude">
+      <div class="bubble-label">Claude répond</div>
+      <span id="responseText">...</span>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn primary" id="mainBtn" onclick="toggleListening()">Activer l'écoute</button>
+    <button class="btn" onclick="replayLast()">🔊 Réécouter</button>
+  </div>
+
+  <div class="footer-links">
+    <button class="footer-btn" onclick="toggleHistory()">Historique</button>
+    <button class="footer-btn" onclick="document.getElementById('setupOverlay').style.display='flex'">Paramètres</button>
+    <button class="footer-btn" onclick="clearAll()">Effacer</button>
+  </div>
+</div>
+
+<script>
+let apiKey = localStorage.getItem('claude_api_key') || '';
+let recognition = null;
+let isActive = false;
+let wakeDetected = false;
+let currentMsg = '';
+let lastResponse = '';
+let history = [];
+let frVoice = null;
+let synth = window.speechSynthesis;
+
+const WAKE = ['hey claude','hé claude','hey clod','é claude','ai claude','hey cloud'];
+const SEND = ['envoyer','envoie','envoi'];
+
+// Show setup if no key
+if (!apiKey) document.getElementById('setupOverlay').style.display = 'flex';
+else document.getElementById('setupOverlay').style.display = 'none';
+
+function saveSetup() {
+  const k = document.getElementById('apiInput').value.trim();
+  if (!k.startsWith('sk-ant-')) {
+    document.getElementById('setupError').style.display = 'block'; return;
+  }
+  apiKey = k;
+  localStorage.setItem('claude_api_key', k);
+  document.getElementById('setupOverlay').style.display = 'none';
+  speak('Bonjour ! Je suis prêt. Appuie sur le bouton puis dis Hey Claude pour me parler.');
+}
+
+// Voices
+function loadVoices() {
+  const voices = synth.getVoices();
+  frVoice = voices.find(v => v.lang === 'fr-CA' && v.localService)
+         || voices.find(v => v.lang === 'fr-FR' && v.localService)
+         || voices.find(v => v.lang.startsWith('fr'));
+}
+synth.onvoiceschanged = loadVoices;
+loadVoices();
+
+function speak(text, onEnd) {
+  synth.cancel();
+  const utt = new SpeechSynthesisUtterance(text);
+  utt.lang = 'fr-CA'; utt.rate = 1.0;
+  if (frVoice) utt.voice = frVoice;
+  if (onEnd) utt.onend = onEnd;
+  synth.speak(utt);
+}
+
+function playBip() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = 920; gain.gain.value = 0.25;
+    osc.start(); osc.stop(ctx.currentTime + 0.12);
+  } catch(e) {}
+}
+
+function setState(state, emoji, label, hint) {
+  document.body.className = state;
+  document.getElementById('orb').textContent = emoji;
+  document.getElementById('stateLabel').textContent = label;
+  document.getElementById('stateHint').textContent = hint;
+}
+
+function orbClick() { if (!isActive) toggleListening(); }
+
+function toggleListening() {
+  if (!apiKey) { document.getElementById('setupOverlay').style.display = 'flex'; return; }
+  if (isActive) {
+    stopAll();
+  } else {
+    startAll();
+  }
+}
+
+function startAll() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { alert('Ouvre cette page dans Google Chrome.'); return; }
+
+  recognition = new SR();
+  recognition.lang = 'fr-CA';
+  recognition.continuous = true;
+  recognition.interimResults = true;
+
+  recognition.onresult = handleSpeech;
+  recognition.onend = () => { if (isActive) { try { recognition.start(); } catch(e) {} } };
+  recognition.onerror = (e) => { if (e.error !== 'no-speech' && isActive) { try { recognition.start(); } catch(err) {} } };
+
+  isActive = true;
+  try { recognition.start(); } catch(e) {}
+  setState('listening', '👂', 'En écoute...', 'Dis "Hey Claude" pour me parler');
+  document.getElementById('mainBtn').textContent = 'Arrêter';
+  speak('Je suis prêt. Dis Hey Claude.');
+}
+
+function stopAll() {
+  isActive = false; wakeDetected = false;
+  if (recognition) { try { recognition.stop(); } catch(e) {} recognition = null; }
+  synth.cancel();
+  setState('waiting', '🎤', 'En pause', 'Appuie sur le bouton pour réactiver');
+  document.getElementById('mainBtn').textContent = 'Activer l\'écoute';
+}
+
+function handleSpeech(e) {
+  let interim = '', final = '';
+  for (let i = e.resultIndex; i < e.results.length; i++) {
+    const t = e.results[i][0].transcript.toLowerCase().trim();
+    if (e.results[i].isFinal) final += t; else interim += t;
+  }
+  const text = (final || interim).trim();
+  if (!text) return;
+
+  if (!wakeDetected) {
+    if (WAKE.some(w => text.includes(w))) {
+      wakeDetected = true; currentMsg = '';
+      playBip();
+      setState('recording', '🔴', 'Je t\'écoute !', 'Parle... puis dis "Envoyer"');
+      document.getElementById('transcriptText').textContent = '...';
+      document.getElementById('bubbleYou').classList.add('active');
+    }
+  } else {
+    const clean = text
+      .replace(/hey claude|hé claude|é claude|ai claude|hey cloud/gi, '')
+      .trim();
+    if (SEND.some(w => clean.includes(w))) {
+      const msg = clean.replace(/envoyer\.?|envoie\.?|envoi\.?/gi, '').trim();
+      if (msg.length > 1) { currentMsg = msg; processMessage(); }
+      else { resetListen(); }
+    } else {
+      document.getElementById('transcriptText').textContent = clean || '...';
+      currentMsg = clean;
+    }
+  }
+}
+
+function resetListen() {
+  wakeDetected = false; currentMsg = '';
+  document.getElementById('bubbleYou').classList.remove('active');
+  setState('listening', '👂', 'En écoute...', 'Dis "Hey Claude" pour me parler');
+}
+
+async function processMessage() {
+  if (!currentMsg) return;
+  const msg = currentMsg;
+  currentMsg = ''; wakeDetected = false;
+  document.getElementById('transcriptText').textContent = msg;
+  document.getElementById('bubbleYou').classList.add('active');
+  setState('thinking', '🤔', 'Je réfléchis...', 'Claude prépare sa réponse...');
+  document.getElementById('responseText').textContent = '...';
+  document.getElementById('bubbleClaude').classList.remove('active');
+
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        system: 'Tu es un assistant personnel francophone vocal. Réponds toujours en français canadien, de façon concise et naturelle. Tes réponses sont lues à voix haute — parle normalement, sans listes, sans astérisques, sans symboles markdown.',
+        messages: [{ role: 'user', content: msg }]
+      })
+    });
+    const data = await r.json();
+    const reply = data.content?.[0]?.text || 'Désolé, je n\'ai pas pu répondre.';
+    lastResponse = reply;
+    document.getElementById('responseText').textContent = reply;
+    document.getElementById('bubbleClaude').classList.add('active');
+    history.unshift({ you: msg, claude: reply });
+    updateHistory();
+    setState('speaking', '🔊', 'Je réponds...', 'Écoute dans tes AirPods');
+    speak(reply, () => { resetListen(); });
+  } catch(e) {
+    document.getElementById('responseText').textContent = 'Erreur — vérifie ta clé API dans Paramètres.';
+    speak('Une erreur est survenue.', () => { resetListen(); });
+  }
+}
+
+function replayLast() { if (lastResponse) speak(lastResponse); }
+
+function clearAll() {
+  document.getElementById('transcriptText').textContent = 'En attente de ta voix...';
+  document.getElementById('responseText').textContent = '...';
+  document.getElementById('bubbleYou').classList.remove('active');
+  document.getElementById('bubbleClaude').classList.remove('active');
+  lastResponse = '';
+}
+
+function updateHistory() {
+  const el = document.getElementById('historyContent');
+  if (!history.length) { el.innerHTML = '<div class="history-empty">Aucune conversation pour l\'instant.</div>'; return; }
+  el.innerHTML = history.slice(0, 30).map(h => `
+    <div class="history-item">
+      <div class="history-you">Toi : ${h.you}</div>
+      <div class="history-claude">Claude : ${h.claude.substring(0,200)}${h.claude.length>200?'...':''}</div>
+    </div>`).join('');
+}
+
+function toggleHistory() {
+  const p = document.getElementById('historyPanel');
+  p.classList.toggle('open');
+}
+</script>
+</body>
+</html>
